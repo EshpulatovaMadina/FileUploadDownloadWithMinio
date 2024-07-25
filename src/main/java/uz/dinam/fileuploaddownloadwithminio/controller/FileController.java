@@ -2,17 +2,17 @@ package uz.dinam.fileuploaddownloadwithminio.controller;
 
 
 import io.minio.*;
+import io.minio.http.Method;
 import io.minio.messages.Item;
 import lombok.RequiredArgsConstructor;
-import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 
-import java.io.InputStream;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.TimeUnit;
 
 
 @RestController
@@ -31,16 +31,21 @@ public class FileController {
         }
     }
 
+
     @PostMapping("/upload")
     public ResponseEntity<String> uploadFile(@RequestParam("file") MultipartFile file) {
         try {
             ensureBucketExists();
-            minioClient.putObject(
-                    PutObjectArgs.builder().bucket(BUCKET_NAME).object(file.getOriginalFilename()).stream(
-                                    file.getInputStream(), file.getSize(), -1)
-                            .build()
-            );
-            return ResponseEntity.ok("File uploaded successfully.");
+
+            String resignedUrl = minioClient.getPresignedObjectUrl(
+                    GetPresignedObjectUrlArgs.builder()
+                            .method(Method.PUT)
+                            .bucket(BUCKET_NAME)
+                            .object(file.getOriginalFilename())
+                            .expiry(60 * 60 * 24, TimeUnit.SECONDS)
+                            .build());
+
+            return ResponseEntity.ok(resignedUrl);
         } catch (Exception e) {
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body("File upload failed: " + e.getMessage());
         }
@@ -49,16 +54,21 @@ public class FileController {
     @GetMapping("/download/{filename}")
     public ResponseEntity<?> downloadFile(@PathVariable String filename) {
         try {
-            InputStream stream = minioClient.getObject(
-                    GetObjectArgs.builder().bucket(BUCKET_NAME).object(filename).build()
-            );
+            ensureBucketExists();
 
-            return ResponseEntity.ok()
-                    .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"" + filename + "\"")
-                    .body(stream.readAllBytes());
+            String resignedUrl = minioClient.getPresignedObjectUrl(
+                    GetPresignedObjectUrlArgs.builder()
+                            .method(Method.GET)
+                            .bucket(BUCKET_NAME)
+                            .object(filename)
+                            .expiry(60 * 60 * 24, TimeUnit.SECONDS)
+                            .build());
+
+            return ResponseEntity.ok(resignedUrl);
         } catch (Exception e) {
-            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body("File download failed: " + e.getMessage());
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body("File upload failed: " + e.getMessage());
         }
+
     }
 
     @GetMapping("/list")
